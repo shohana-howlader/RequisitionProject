@@ -1,0 +1,183 @@
+﻿<!-- Views/Requisition/Details.cshtml -->
+@model RequisitionProject.Models.ViewModel.RequisitionDetailsViewModel
+@{
+    ViewData["Title"] = "Requisition Details";
+}
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h3 class="card-title">Requisition Details - @Model.RequisitionNumber</h3>
+                    <div>
+                        @if (Model.Status == RequisitionStatus.Draft)
+                        {
+                            <form asp-action="Submit" asp-route-id="@Model.RequisitionId" method="post" style="display:inline;">
+                                <button type="submit" class="btn btn-success" onclick="return confirm('Are you sure you want to submit this requisition?')">Submit</button>
+                            </form>
+                        }
+                        <a href="@Url.Action("Index")" class="btn btn-secondary">Back to List</a>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-borderless">
+                                <tr>
+                                    <td><strong>Requisition Number:</strong></td>
+                                    <td>@Model.RequisitionNumber</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Requested By:</strong></td>
+                                    <td>@Model.RequestedBy</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Department:</strong></td>
+                                    <td>@Model.Department</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Request Date:</strong></td>
+                                    <td>@Model.RequestDate.ToString("dd/MM/yyyy HH:mm")</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-borderless">
+                                <tr>
+                                    <td><strong>Type:</strong></td>
+                                    <td>
+                                        <span class="badge bg-@(Model.Type == RequisitionType.Urgent ? "warning" : "info")">
+                                            @Model.Type
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Status:</strong></td>
+                                    <td>
+                                        <span class="badge bg-@GetStatusColor(Model.Status)">
+                                            @Model.Status
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Purpose:</strong></td>
+                                    <td>@Model.Purpose</td>
+                                </tr>
+                                @if (!string.IsNullOrEmpty(Model.Remarks))
+                                {
+                                    <tr>
+                                        <td><strong>Remarks:</strong></td>
+                                        <td>@Model.Remarks</td>
+                                    </tr>
+                                }
+                            </table>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h4>Items</h4>
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Unit</th>
+                                    <th>Unit Price</th>
+                                    <th>Quantity</th>
+                                    <th>Total Price</th>
+                                    <th>Purpose</th>
+                                    <th>Remarks</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in Model.Items)
+                                {
+                                    <tr>
+                                        <td>@item.ProductName</td>
+                                        <td>@item.Unit</td>
+                                        <td>$@item.UnitPrice.ToString("F2")</td>
+                                        <td>@item.Quantity</td>
+                                        <td>$@item.TotalPrice.ToString("F2")</td>
+                                        <td>@item.Purpose</td>
+                                        <td>@item.Remarks</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-active">
+                                    <th colspan="4">Total</th>
+                                    <th>$@Model.Items.Sum(i => i.TotalPrice).ToString("F2")</th>
+                                    <th colspan="2"></th>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+
+                    @if (Model.Approvals.Any())
+                    {
+                        <hr>
+                        <h4>Approval History</h4>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Level</th>
+                                        <th>Role</th>
+                                        <th>Approver</th>
+                                        <th>Status</th>
+                                        <th>Date</th>
+                                        <th>Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var approval in Model.Approvals.OrderBy(a => a.Level))
+                                    {
+                                        <tr>
+                                            <td>@approval.Level</td>
+                                            <td>@approval.ApproverRole</td>
+                                            <td>@(approval.ApproverName ?? "Pending")</td>
+                                            <td>
+                                                <span class="badge bg-@GetApprovalStatusColor(approval.Status)">
+                                                    @approval.Status
+                                                </span>
+                                            </td>
+                                            <td>@(approval.ApprovalDate?.ToString("dd/MM/yyyy HH:mm") ?? "-")</td>
+                                            <td>@approval.Remarks</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@functions {
+    string GetStatusColor(RequisitionStatus status)
+    {
+        return status switch
+        {
+            RequisitionStatus.Draft => "secondary",
+            RequisitionStatus.Submitted => "primary",
+            RequisitionStatus.PartiallyApproved => "warning",
+            RequisitionStatus.Approved => "success",
+            RequisitionStatus.Rejected => "danger",
+            _ => "secondary"
+        };
+    }
+
+    string GetApprovalStatusColor(ApprovalStatus status)
+    {
+        return status switch
+        {
+            ApprovalStatus.Pending => "warning",
+            ApprovalStatus.Approved => "success",
+            ApprovalStatus.Rejected => "danger",
+            _ => "secondary"
+        };
+    }
+}
