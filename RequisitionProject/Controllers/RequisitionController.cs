@@ -37,21 +37,21 @@ namespace RequisitionProject.Controllers
             // Remove empty items before validation
             model.Items = model.Items?.Where(i => i.ProductId > 0 && i.Quantity > 0).ToList() ?? new List<RequisitionItemViewModel>();
 
-            if (!ModelState.IsValid || !model.Items.Any())
-            {
-                if (!model.Items.Any())
-                {
-                    ModelState.AddModelError("Items", "At least one item is required.");
-                    model.Items.Add(new RequisitionItemViewModel()); // Add empty item for form
-                }
-                await LoadDropdownData(model);
-                return View(model);
-            }
+            //if (!ModelState.IsValid || !model.Items.Any())
+            //{
+            //    if (!model.Items.Any())
+            //    {
+            //        ModelState.AddModelError("Items", "At least one item is required.");
+            //        model.Items.Add(new RequisitionItemViewModel()); // Add empty item for form
+            //    }
+            //    await LoadDropdownData(model);
+            //    return View(model);
+            //}
 
             try
             {
+                // Option 1: Using the stored procedure (as you have)
                 var requisitionNumber = await GenerateRequisitionNumber();
-
                 var itemsJson = JsonConvert.SerializeObject(model.Items.Select(i => new
                 {
                     ProductId = i.ProductId,
@@ -60,7 +60,6 @@ namespace RequisitionProject.Controllers
                     Remarks = i.Remarks ?? string.Empty
                 }));
 
-                // Use parameters properly
                 var parameters = new[]
                 {
                     new SqlParameter("@RequisitionNumber", SqlDbType.NVarChar, 50) { Value = requisitionNumber },
@@ -74,10 +73,14 @@ namespace RequisitionProject.Controllers
                 };
 
                 await _context.Database.ExecuteSqlRawAsync(
-                    "EXEC sp_InsertRequisition @RequisitionNumber, @RequestedBy, @Department, @Purpose, @Type, @Remarks, @Items, @RequisitionId OUTPUT",
+                    "EXEC [dbo].[sp_InsertRequisition] @RequisitionNumber, @RequestedBy, @Department, @Purpose, @Type, @Remarks, @Items, @RequisitionId OUTPUT",
                     parameters);
 
+              
                 var requisitionId = (int)parameters[7].Value;
+
+                
+
                 TempData["Success"] = "Requisition created successfully!";
                 return RedirectToAction("Details", new { id = requisitionId });
             }
@@ -94,29 +97,54 @@ namespace RequisitionProject.Controllers
         {
             try
             {
-                var results = await _context.RequisitionDetailsViewModels
-                    .FromSqlRaw("EXEC sp_GetRequisitionForApproval @RequisitionId = {0}", id)
-                    .ToListAsync();
+                // First try to get requisition details using Entity Framework
+                var requisition = await _context.Requisitions
+                    .Include(r => r.Items)
+                        .ThenInclude(i => i.Product)
+                    .Include(r => r.Approvals)
+                    .FirstOrDefaultAsync(r => r.RequisitionId == id);
 
-                if (results == null || results.Count == 0)
+                if (requisition != null)
                 {
-                    TempData["Error"] = "Requisition not found.";
-                    return RedirectToAction("Index");
+                    // Map to ViewModel
+                    var viewModel = new RequisitionDetailsViewModel
+                    {
+                        RequisitionId = requisition.RequisitionId,
+                        RequisitionNumber = requisition.RequisitionNumber,
+                        RequestedBy = requisition.RequestedBy,
+                        Department = requisition.Department,
+                        RequestDate = requisition.RequestDate,
+                        Type = requisition.Type,
+                        Purpose = requisition.Purpose,
+                        Status = requisition.Status,
+                        Remarks = requisition.Remarks,
+                        Items = requisition.Items.Select(i => new RequisitionItemDetailsViewModel
+                        {
+                            RequisitionItemId = i.RequisitionItemId,
+                            ProductId = i.ProductId,
+                            ProductName = i.Product?.Name ?? "Unknown Product",
+                            Unit = i.Product?.Unit ?? "",
+                            UnitPrice = i.Product?.UnitPrice ?? 0,
+                            Quantity = i.Quantity,
+                            Purpose = i.Purpose,
+                            Remarks = i.Remarks
+                        }).ToList(),
+                        Approvals = requisition.Approvals.Select(a => new ApprovalDetailsViewModel
+                        {
+                            Level = a.Level,
+                            ApproverName = a.ApproverName,
+                            ApproverRole = a.ApproverRole,
+                            Status = a.Status,
+                            ApprovalDate = a.ApprovalDate,
+                            Remarks = a.Remarks
+                        }).ToList()
+                    };
+
+                    return View(viewModel);
                 }
 
-                var requisition = results.First();
-                var items = await _context.RequisitionItemDetailsViewModels
-                    .FromSqlRaw("EXEC sp_GetRequisitionItems @RequisitionId = {0}", id)
-                    .ToListAsync();
-
-                var approvals = await _context.ApprovalDetailsViewModels
-                    .FromSqlRaw("EXEC sp_GetRequisitionApprovals @RequisitionId = {0}", id)
-                    .ToListAsync();
-
-                requisition.Items = items;
-                requisition.Approvals = approvals;
-
-                return View(requisition);
+                TempData["Error"] = "Requisition not found.";
+                return RedirectToAction("Index");
             }
             catch (Exception ex)
             {
@@ -130,8 +158,20 @@ namespace RequisitionProject.Controllers
         {
             try
             {
-                var requisitions = await _context.RequisitionListViewModels
-                    .FromSqlRaw("SELECT RequisitionId, RequisitionNumber, RequestDate, RequestedBy, Department, Purpose, Type, Status FROM Requisition ORDER BY RequestDate DESC")
+                // Use Entity Framework instead of stored procedure for listing
+                var requisitions = await _context.Requisitions
+                    .OrderByDescending(r => r.RequestDate)
+                    .Select(r => new RequisitionListViewModel
+                    {
+                        RequisitionId = r.RequisitionId,
+                        RequisitionNumber = r.RequisitionNumber,
+                        RequestDate = r.RequestDate,
+                        RequestedBy = r.RequestedBy,
+                        Department = r.Department,
+                        Purpose = r.Purpose,
+                        Type = r.Type,
+                        Status = r.Status
+                    })
                     .ToListAsync();
 
                 return View(requisitions);
@@ -150,11 +190,17 @@ namespace RequisitionProject.Controllers
         {
             try
             {
-                await _context.Database.ExecuteSqlRawAsync(
-                    "EXEC sp_SubmitRequisition @RequisitionId = {0}",
-                    id);
-
-                TempData["Success"] = "Requisition submitted successfully!";
+                var requisition = await _context.Requisitions.FindAsync(id);
+                if (requisition != null)
+                {
+                    requisition.Status = RequisitionStatus.Submitted;
+                    await _context.SaveChangesAsync();
+                    TempData["Success"] = "Requisition submitted successfully!";
+                }
+                else
+                {
+                    TempData["Error"] = "Requisition not found.";
+                }
             }
             catch (Exception ex)
             {
@@ -169,19 +215,16 @@ namespace RequisitionProject.Controllers
         {
             try
             {
-                var requisition = await _context.RequisitionDetailsViewModels
-                    .FromSqlRaw("EXEC sp_GetRequisitionForApproval @RequisitionId = {0}", id)
-                    .FirstOrDefaultAsync();
+                var requisition = await _context.Requisitions
+                    .Include(r => r.Items)
+                        .ThenInclude(i => i.Product)
+                    .FirstOrDefaultAsync(r => r.RequisitionId == id);
 
                 if (requisition == null)
                 {
                     TempData["Error"] = "Requisition not found.";
                     return RedirectToAction("PendingApprovals");
                 }
-
-                var items = await _context.RequisitionItemDetailsViewModels
-                    .FromSqlRaw("EXEC sp_GetRequisitionItems @RequisitionId = {0}", id)
-                    .ToListAsync();
 
                 var model = new ApprovalViewModel
                 {
@@ -192,10 +235,10 @@ namespace RequisitionProject.Controllers
                     RequestDate = requisition.RequestDate,
                     Type = requisition.Type,
                     Purpose = requisition.Purpose,
-                    Items = items.Select(i => new RequisitionItemViewModel
+                    Items = requisition.Items.Select(i => new RequisitionItemViewModel
                     {
                         ProductId = i.ProductId,
-                        ProductName = i.ProductName,
+                        ProductName = i.Product?.Name ?? "Unknown Product",
                         Quantity = i.Quantity,
                         Purpose = i.Purpose,
                         Remarks = i.Remarks
@@ -222,19 +265,45 @@ namespace RequisitionProject.Controllers
             try
             {
                 var level = DetermineApprovalLevel(User);
+                var userRole = GetUserRole(User);
 
-                await _context.Database.ExecuteSqlRawAsync(
-                    "EXEC sp_ApproveRequisition @RequisitionId = {0}, @Level = {1}, @ApproverName = {2}, @Status = {3}, @Remarks = {4}",
-                    model.RequisitionId,
-                    level,
-                    User.Identity.Name ?? "Approver",
-                    (int)model.Decision,
-                    model.ApprovalRemarks
-                );
+                var approval = await _context.RequisitionApprovals
+                    .FirstOrDefaultAsync(a => a.RequisitionId == model.RequisitionId && a.Level == level);
 
-                TempData["Success"] = model.Decision == ApprovalStatus.Approved
-                    ? "Requisition approved successfully!"
-                    : "Requisition rejected.";
+                if (approval != null)
+                {
+                    approval.Status = model.Decision;
+                    approval.ApproverName = User.Identity?.Name ?? "Approver";
+                    approval.ApprovalDate = DateTime.Now;
+                    approval.Remarks = model.ApprovalRemarks;
+
+                    // Update requisition status based on approval decision
+                    var requisition = await _context.Requisitions.FindAsync(model.RequisitionId);
+                    if (requisition != null)
+                    {
+                        if (model.Decision == ApprovalStatus.Rejected)
+                        {
+                            requisition.Status = RequisitionStatus.Rejected;
+                        }
+                        else if (model.Decision == ApprovalStatus.Approved)
+                        {
+                            if (level == 1)
+                            {
+                                requisition.Status = RequisitionStatus.PartiallyApproved;
+                            }
+                            else
+                            {
+                                requisition.Status = RequisitionStatus.Approved;
+                            }
+                        }
+                    }
+
+                    await _context.SaveChangesAsync();
+
+                    TempData["Success"] = model.Decision == ApprovalStatus.Approved
+                        ? "Requisition approved successfully!"
+                        : "Requisition rejected.";
+                }
 
                 return RedirectToAction("PendingApprovals");
             }
@@ -253,8 +322,21 @@ namespace RequisitionProject.Controllers
                 var userRole = GetUserRole(User);
                 var level = userRole == "Department Head" ? 1 : 2;
 
-                var pendingApprovals = await _context.PendingApprovalViewModels
-                    .FromSqlRaw("EXEC sp_GetPendingApprovals @ApproverRole = {0}, @Level = {1}", userRole, level)
+                var pendingApprovals = await _context.RequisitionApprovals
+                    .Include(a => a.Requisition)
+                    .Where(a => a.ApproverRole == userRole && a.Status == ApprovalStatus.Pending)
+                    .Select(a => new PendingApprovalViewModel
+                    {
+                        RequisitionId = a.RequisitionId,
+                        RequisitionNumber = a.Requisition.RequisitionNumber,
+                        RequestedBy = a.Requisition.RequestedBy,
+                        Department = a.Requisition.Department,
+                        RequestDate = a.Requisition.RequestDate,
+                        Type = a.Requisition.Type,
+                        Purpose = a.Requisition.Purpose,
+                        Level = a.Level,
+                        ApproverRole = a.ApproverRole
+                    })
                     .ToListAsync();
 
                 return View(pendingApprovals);
