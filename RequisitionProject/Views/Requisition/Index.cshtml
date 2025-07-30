@@ -1,4 +1,4 @@
-﻿<!-- Views/Requisition/Index.cshtml -->
+﻿﻿<!-- Views/Requisition/Index.cshtml -->
 @model IEnumerable<RequisitionProject.Models.ViewModel.RequisitionListViewModel>
 
 @{
@@ -54,7 +54,7 @@
                                                 @if (item.Status == RequisitionStatus.Draft)
                                                 {
                                                     <form asp-action="Submit" asp-route-id="@item.RequisitionId" method="post" style="display:inline;">
-                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Are you sure you want to submit this requisition?')">Submit</button>
+                                                        <button type="Approve" class="btn btn-sm btn-success" onclick="return confirm('Are you sure you want to Approve this requisition?')">Approve</button>
                                                     </form>
                                                 }
                                             </td>
