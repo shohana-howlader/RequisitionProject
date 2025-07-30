@@ -45,16 +45,25 @@
                                                 </span>
                                             </td>
                                             <td>
-                                                <span class="badge bg-@GetStatusColor(item.Status)">
-                                                    @item.Status
-                                                </span>
+                                                 @if (item.Status == RequisitionStatus.Draft)
+                                                {
+                                                    <!-- Show Pending button that links to Edit -->
+                                                    <a href="@Url.Action("Edit", new { id = item.RequisitionId })" class="btn btn-sm btn-outline-secondary">Pending</a>
+                                                }
+                                                else
+                                                {
+                                                    <!-- Show status as badge -->
+                                                    <span class="badge bg-@GetStatusColor(item.Status)">
+                                                        @item.Status
+                                                    </span>
+                                                  }
                                             </td>
                                             <td>
                                                 <a href="@Url.Action("Details", new { id = item.RequisitionId })" class="btn btn-sm btn-outline-primary">View</a>
                                                 @if (item.Status == RequisitionStatus.Draft)
                                                 {
                                                     <form asp-action="Submit" asp-route-id="@item.RequisitionId" method="post" style="display:inline;">
-                                                        <button type="Approve" class="btn btn-sm btn-success" onclick="return confirm('Are you sure you want to Approve this requisition?')">Approve</button>
+                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Are you sure you want to Approve this requisition?')">Approve</button>
                                                     </form>
                                                 }
                                             </td>
