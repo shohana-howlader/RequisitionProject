@@ -37,20 +37,8 @@ namespace RequisitionProject.Controllers
             // Remove empty items before validation
             model.Items = model.Items?.Where(i => i.ProductId > 0 && i.Quantity > 0).ToList() ?? new List<RequisitionItemViewModel>();
 
-            //if (!ModelState.IsValid || !model.Items.Any())
-            //{
-            //    if (!model.Items.Any())
-            //    {
-            //        ModelState.AddModelError("Items", "At least one item is required.");
-            //        model.Items.Add(new RequisitionItemViewModel()); // Add empty item for form
-            //    }
-            //    await LoadDropdownData(model);
-            //    return View(model);
-            //}
-
             try
             {
-                // Option 1: Using the stored procedure (as you have)
                 var requisitionNumber = await GenerateRequisitionNumber();
                 var itemsJson = JsonConvert.SerializeObject(model.Items.Select(i => new
                 {
@@ -60,26 +48,41 @@ namespace RequisitionProject.Controllers
                     Remarks = i.Remarks ?? string.Empty
                 }));
 
+
+                var sqlScript = $@"DECLARE @NewRequisitionId INT;
+
+                        EXEC [dbo].[sp_InsertRequisition]
+                            @RequisitionNumber = N'{requisitionNumber.Replace("'", "''")}',
+                            @RequestedBy = N'{(User.Identity?.Name ?? "Anonymous").Replace("'", "''")}',
+                            @Department = N'{model.Department.Replace("'", "''")}',
+                            @Purpose = N'{model.Purpose.Replace("'", "''")}',
+                            @Type = {(int)model.Type},
+                            @Remarks = {(string.IsNullOrEmpty(model.Remarks) ? "NULL" : $"N'{model.Remarks.Replace("'", "''")}'")},
+                            @Items = N'{itemsJson.Replace("'", "''")}',
+                            @RequisitionId = @NewRequisitionId OUTPUT;
+
+                        SELECT @NewRequisitionId AS 'New Requisition ID';";
+
+                Console.WriteLine(sqlScript);
+
+                // Original execution
                 var parameters = new[]
                 {
-                    new SqlParameter("@RequisitionNumber", SqlDbType.NVarChar, 50) { Value = requisitionNumber },
-                    new SqlParameter("@RequestedBy", SqlDbType.NVarChar, 255) { Value = User.Identity?.Name ?? "Anonymous" },
-                    new SqlParameter("@Department", SqlDbType.NVarChar, 255) { Value = model.Department },
-                    new SqlParameter("@Purpose", SqlDbType.NVarChar, 500) { Value = model.Purpose },
-                    new SqlParameter("@Type", SqlDbType.Int) { Value = (int)model.Type },
-                    new SqlParameter("@Remarks", SqlDbType.NVarChar, 1000) { Value = model.Remarks ?? (object)DBNull.Value },
-                    new SqlParameter("@Items", SqlDbType.NVarChar, -1) { Value = itemsJson },
-                    new SqlParameter("@RequisitionId", SqlDbType.Int) { Direction = ParameterDirection.Output }
-                };
+            new SqlParameter("@RequisitionNumber", SqlDbType.NVarChar, 50) { Value = requisitionNumber },
+            new SqlParameter("@RequestedBy", SqlDbType.NVarChar, 255) { Value = User.Identity?.Name ?? "Anonymous" },
+            new SqlParameter("@Department", SqlDbType.NVarChar, 255) { Value = model.Department },
+            new SqlParameter("@Purpose", SqlDbType.NVarChar, 500) { Value = model.Purpose },
+            new SqlParameter("@Type", SqlDbType.Int) { Value = (int)model.Type },
+            new SqlParameter("@Remarks", SqlDbType.NVarChar, 1000) { Value = model.Remarks ?? (object)DBNull.Value },
+            new SqlParameter("@Items", SqlDbType.NVarChar, -1) { Value = itemsJson },
+            new SqlParameter("@RequisitionId", SqlDbType.Int) { Direction = ParameterDirection.Output }
+        };
 
                 await _context.Database.ExecuteSqlRawAsync(
                     "EXEC [dbo].[sp_InsertRequisition] @RequisitionNumber, @RequestedBy, @Department, @Purpose, @Type, @Remarks, @Items, @RequisitionId OUTPUT",
                     parameters);
 
-              
                 var requisitionId = (int)parameters[7].Value;
-
-                
 
                 TempData["Success"] = "Requisition created successfully!";
                 return RedirectToAction("Details", new { id = requisitionId });
